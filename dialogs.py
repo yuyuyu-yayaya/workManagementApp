@@ -205,3 +205,120 @@ class ResultDialog(tk.Toplevel):
         button_frame.pack(fill=tk.X)
         close_button = ttk.Button(button_frame, text="閉じる", command=self.destroy)
         close_button.pack(side=tk.RIGHT)
+
+class AllLogsViewerDialog(tk.Toplevel):
+    """
+    過去すべての作業ログを閲覧するためのダイアログ。
+    """
+    def __init__(self, parent, all_logs: list):
+        super().__init__(parent)
+        self.transient(parent)
+        self.grab_set()
+
+        self.title("全作業ログ一覧")
+        self.geometry("600x500")
+
+        self.all_logs = all_logs
+
+        self._create_widgets()
+        self._center_window()
+
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.wait_window(self)
+
+    def _center_window(self):
+        """ダイアログを親ウィンドウの中央に表示する。"""
+        self.update_idletasks()
+        parent_x = self.master.winfo_x()
+        parent_y = self.master.winfo_y()
+        parent_width = self.master.winfo_width()
+        parent_height = self.master.winfo_height()
+        self.geometry(f"+{parent_x + (parent_width // 2) - (self.winfo_width() // 2)}+{parent_y + (parent_height // 2) - (self.winfo_height() // 2)}")
+
+    def _create_widgets(self):
+        main_frame = ttk.Frame(self, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        tree = ttk.Treeview(main_frame, columns=("task", "start", "end", "duration"), show="headings")
+        tree.heading("#0", text="日付") # #0 は item text を表示する特別なカラム
+        tree.heading("task", text="工数名")
+        tree.heading("start", text="開始時刻")
+        tree.heading("end", text="終了時刻")
+        tree.heading("duration", text="作業時間")
+
+        tree.column("task", width=150)
+        tree.column("start", width=100, anchor=tk.CENTER)
+        tree.column("end", width=100, anchor=tk.CENTER)
+        tree.column("duration", width=100, anchor=tk.E)
+
+        # 日付ごとにログをグループ化
+        logs_by_date = {}
+        for log in self.all_logs:
+            work_date = log['work_date']
+            if work_date not in logs_by_date:
+                logs_by_date[work_date] = []
+            logs_by_date[work_date].append(log)
+
+        # Treeviewにデータを挿入
+        for work_date, logs in logs_by_date.items():
+            date_node = tree.insert("", tk.END, text=work_date, open=False) # open=Falseで最初は閉じた状態に
+            for log in logs:
+                start_dt = datetime.fromisoformat(log['start_time'])
+                end_dt = datetime.fromisoformat(log['end_time'])
+                duration = end_dt - start_dt
+                values = (log['task_name'], start_dt.strftime('%H:%M:%S'), end_dt.strftime('%H:%M:%S'), f"{int(duration.total_seconds() // 3600):02}:{int((duration.total_seconds() % 3600) // 60):02}:{int(duration.total_seconds() % 60):02}")
+                tree.insert(date_node, tk.END, values=values)
+
+        tree.pack(fill=tk.BOTH, expand=True)
+
+        close_button = ttk.Button(main_frame, text="閉じる", command=self.destroy, padding=(10, 5))
+        close_button.pack(pady=(10, 0))
+
+class LogViewerDialog(tk.Toplevel):
+    """
+    特定のタスクのログ一覧を表示するダイアログ。
+    """
+    def __init__(self, parent, task_name: str, logs: list):
+        super().__init__(parent)
+        self.transient(parent)
+        self.grab_set()
+
+        self.title(f"ログ詳細: {task_name}")
+        self.geometry("400x300")
+
+        self.task_name = task_name
+        self.logs = logs
+
+        self._create_widgets()
+        self._center_window()
+
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.wait_window(self)
+
+    def _center_window(self):
+        """ダイアログを親ウィンドウの中央に表示する。"""
+        self.update_idletasks()
+        parent_x = self.master.winfo_x()
+        parent_y = self.master.winfo_y()
+        parent_width = self.master.winfo_width()
+        parent_height = self.master.winfo_height()
+        self.geometry(f"+{parent_x + (parent_width // 2) - (self.winfo_width() // 2)}+{parent_y + (parent_height // 2) - (self.winfo_height() // 2)}")
+
+    def _create_widgets(self):
+        main_frame = ttk.Frame(self, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        tree = ttk.Treeview(main_frame, columns=("start", "end", "duration"), show="headings")
+        tree.heading("start", text="開始時刻")
+        tree.heading("end", text="終了時刻")
+        tree.heading("duration", text="作業時間")
+        tree.column("start", width=100, anchor=tk.CENTER)
+        tree.column("end", width=100, anchor=tk.CENTER)
+        tree.column("duration", width=100, anchor=tk.E)
+        tree.pack(fill=tk.BOTH, expand=True)
+
+        for log in self.logs:
+            tree.insert("", tk.END, values=(log['start'], log['end'], log['duration']))
+
+        close_button = ttk.Button(main_frame, text="閉じる", command=self.destroy, padding=(10, 5))
+        close_button.pack(pady=(10, 0))

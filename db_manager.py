@@ -162,6 +162,21 @@ class DatabaseManager:
             print(f"Work Day取得/作成エラー: {e}")
             return None
 
+    def update_work_day_start_time(self, work_day_id: int, start_time: datetime) -> bool:
+        """
+        業務日の開始時刻を更新する。
+        """
+        try:
+            with self.conn:
+                self.cursor.execute(
+                    "UPDATE work_days SET start_time = ? WHERE id = ?",
+                    (start_time.isoformat(), work_day_id)
+                )
+            return self.cursor.rowcount > 0
+        except sqlite3.Error as e:
+            print(f"業務日開始時刻の更新エラー: {e}")
+            return False
+
     def update_work_day_end_time(self, work_day_id: int, end_time: datetime) -> bool:
         """
         業務日の終了時刻を更新する。
@@ -192,6 +207,23 @@ class DatabaseManager:
             return self.cursor.fetchone()
         except sqlite3.Error as e:
             print(f"業務日詳細の取得エラー: {e}")
+            return None
+
+    def get_work_day_by_date(self, work_date: date) -> Optional[sqlite3.Row]:
+        """
+        指定された日付のwork_dayレコードを取得する。
+
+        Args:
+            work_date (date): 対象の日付。
+
+        Returns:
+            Optional[sqlite3.Row]: work_daysテーブルのレコード。見つからなければNone。
+        """
+        try:
+            self.cursor.execute("SELECT * FROM work_days WHERE work_date = ?", (work_date.isoformat(),))
+            return self.cursor.fetchone()
+        except sqlite3.Error as e:
+            print(f"日付によるWork Day取得エラー: {e}")
             return None
     def get_summary_for_day(self, work_day_id: int, business_start_time: datetime, business_end_time: datetime) -> Dict[str, Any]:
         """
@@ -291,6 +323,32 @@ class DatabaseManager:
             return self.cursor.fetchall()
         except sqlite3.Error as e:
             print(f"日次ログ取得エラー: {e}")
+            return []
+
+    def get_all_completed_logs(self) -> List[sqlite3.Row]:
+        """
+        完了したすべての時間ログを、日付とタスク名とともに取得する。
+        日付の降順、開始時刻の昇順でソートする。
+
+        Returns:
+            List[sqlite3.Row]: 時間ログのリスト。
+        """
+        try:
+            self.cursor.execute("""
+                SELECT
+                    wd.work_date,
+                    t.task_name,
+                    tl.start_time,
+                    tl.end_time
+                FROM time_logs tl
+                JOIN work_days wd ON tl.work_day_id = wd.id
+                JOIN tasks t ON tl.task_id = t.id
+                WHERE tl.end_time IS NOT NULL
+                ORDER BY wd.work_date DESC, tl.start_time ASC
+            """)
+            return self.cursor.fetchall()
+        except sqlite3.Error as e:
+            print(f"全ログ取得エラー: {e}")
             return []
 
     def get_logs_for_task_on_day(self, work_day_id: int, task_id: int) -> List[sqlite3.Row]:

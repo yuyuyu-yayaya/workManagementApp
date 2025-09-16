@@ -142,6 +142,125 @@ class EndTimeDialog(tk.Toplevel):
         self.end_time = None
         self.destroy()
 
+class EditTimeDialog(tk.Toplevel):
+    """
+    汎用的な時刻編集ダイアログ。
+    """
+    def __init__(self, parent, title: str, initial_time: datetime):
+        super().__init__(parent)
+        self.transient(parent)
+        self.grab_set()
+
+        self.title(title)
+        self.geometry("300x120")
+
+        self.selected_time: Optional[datetime] = None
+        self.initial_time = initial_time
+
+        self._create_widgets()
+        self._center_window()
+
+        self.protocol("WM_DELETE_WINDOW", self._on_cancel)
+        self.wait_window(self)
+
+    def _center_window(self):
+        """ダイアログを親ウィンドウの中央に表示する。"""
+        self.update_idletasks()
+        parent_x = self.master.winfo_x()
+        parent_y = self.master.winfo_y()
+        parent_width = self.master.winfo_width()
+        parent_height = self.master.winfo_height()
+        self.geometry(f"+{parent_x + (parent_width // 2) - (self.winfo_width() // 2)}+{parent_y + (parent_height // 2) - (self.winfo_height() // 2)}")
+
+    def _create_widgets(self):
+        main_frame = ttk.Frame(self, padding="15")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        time_label = ttk.Label(main_frame, text="時刻:")
+        time_label.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.hour_var = tk.StringVar(value=f"{self.initial_time.hour:02}")
+        self.minute_var = tk.StringVar(value=f"{self.initial_time.minute:02}")
+
+        hour_spinbox = ttk.Spinbox(main_frame, from_=0, to=23, textvariable=self.hour_var, width=4, format="%02.0f")
+        hour_spinbox.pack(side=tk.LEFT)
+        separator = ttk.Label(main_frame, text=":")
+        separator.pack(side=tk.LEFT, padx=2)
+        minute_spinbox = ttk.Spinbox(main_frame, from_=0, to=59, textvariable=self.minute_var, width=4, format="%02.0f")
+        minute_spinbox.pack(side=tk.LEFT)
+
+        button_frame = ttk.Frame(self, padding=(0, 10, 0, 10))
+        button_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        
+        ok_button = ttk.Button(button_frame, text="確定", command=self._on_ok)
+        ok_button.pack(side=tk.RIGHT)
+        cancel_button = ttk.Button(button_frame, text="キャンセル", command=self._on_cancel)
+        cancel_button.pack(side=tk.RIGHT, padx=(0, 10))
+
+    def _on_ok(self):
+        self.selected_time = self.initial_time.replace(hour=int(self.hour_var.get()), minute=int(self.minute_var.get()), second=0, microsecond=0)
+        self.destroy()
+
+    def _on_cancel(self):
+        self.selected_time = None
+        self.destroy()
+
+class SettingsDialog(tk.Toplevel):
+    """
+    設定を変更するためのダイアログ。
+    """
+    def __init__(self, parent, config_manager):
+        super().__init__(parent)
+        self.transient(parent)
+        self.grab_set()
+
+        self.title("設定")
+        self.geometry("300x150")
+
+        self.config_manager = config_manager
+
+        self._create_widgets()
+        self._center_window()
+
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.wait_window(self)
+
+    def _center_window(self):
+        """ダイアログを親ウィンドウの中央に表示する。"""
+        self.update_idletasks()
+        parent_x = self.master.winfo_x()
+        parent_y = self.master.winfo_y()
+        parent_width = self.master.winfo_width()
+        parent_height = self.master.winfo_height()
+        self.geometry(f"+{parent_x + (parent_width // 2) - (self.winfo_width() // 2)}+{parent_y + (parent_height // 2) - (self.winfo_height() // 2)}")
+
+    def _create_widgets(self):
+        main_frame = ttk.Frame(self, padding="15")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 休憩時間設定
+        break_time_frame = ttk.Frame(main_frame)
+        break_time_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(break_time_frame, text="休憩時間:").pack(side=tk.LEFT)
+        
+        initial_minutes = self.config_manager.get('break_time_minutes', 60)
+        self.break_time_var = tk.StringVar(value=str(initial_minutes))
+        
+        ttk.Spinbox(break_time_frame, from_=0, to=180, increment=15, textvariable=self.break_time_var, width=5).pack(side=tk.LEFT, padx=5)
+        ttk.Label(break_time_frame, text="分").pack(side=tk.LEFT)
+
+        # ボタン
+        button_frame = ttk.Frame(self, padding=(0, 10, 0, 10))
+        button_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        
+        ttk.Button(button_frame, text="保存", command=self._on_save).pack(side=tk.RIGHT)
+
+    def _on_save(self):
+        self.config_manager.set('break_time_minutes', int(self.break_time_var.get()))
+        self.config_manager.save()
+        self.destroy()
+
 class ResultDialog(tk.Toplevel):
     """
     一日の作業サマリーを表示するリザルト画面（画面7）。
@@ -174,15 +293,13 @@ class ResultDialog(tk.Toplevel):
         main_frame = ttk.Frame(self, padding="15")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # --- サマリー情報 ---
-        total_work_time_str = self.summary_data.get('total_work_time', 'N/A')
-        total_task_time_str = self.summary_data.get('total_task_time', 'N/A')
-        other_time_str = self.summary_data.get('other_time', 'N/A')
-
-        ttk.Label(main_frame, text=f"総労働時間: {total_work_time_str}", font=("", 11, "bold")).pack(anchor="w", pady=2)
-        ttk.Label(main_frame, text=f"タスク合計時間: {total_task_time_str}", font=("", 11, "bold")).pack(anchor="w", pady=2)
-        ttk.Label(main_frame, text=f"その他時間: {other_time_str}", font=("", 11, "bold")).pack(anchor="w", pady=2)
-
+        # --- 総労働時間 ---
+        net_work_time_str = self.summary_data.get('net_work_time', 'N/A')
+        start_str = self.summary_data.get('business_start_time_str', '')
+        end_str = self.summary_data.get('business_end_time_str', '')
+        
+        display_text = f"総労働時間: {net_work_time_str} ({start_str}~{end_str})"
+        ttk.Label(main_frame, text=display_text, font=("", 11, "bold")).pack(anchor="w", pady=2)
         ttk.Separator(main_frame, orient='horizontal').pack(fill='x', pady=10)
 
         # --- タスクごとの内訳 ---
@@ -199,6 +316,10 @@ class ResultDialog(tk.Toplevel):
 
         for task in self.summary_data.get('task_details', []):
             tree.insert("", tk.END, values=(task['name'], task['duration_str']))
+
+        # 「その他」の時間を追加
+        other_time_str = self.summary_data.get('other_time', 'N/A')
+        tree.insert("", tk.END, values=("その他", other_time_str))
 
         # --- 閉じるボタン ---
         button_frame = ttk.Frame(self, padding=(0, 10, 0, 10))
@@ -239,18 +360,19 @@ class AllLogsViewerDialog(tk.Toplevel):
         main_frame = ttk.Frame(self, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        tree = ttk.Treeview(main_frame, columns=("task", "start", "end", "duration"), show="headings")
-        tree.heading("#0", text="日付") # #0 は item text を表示する特別なカラム
+        # show="tree headings" に変更し、#0列（ツリー構造）とヘッダーの両方を表示
+        tree = ttk.Treeview(main_frame, columns=("task", "duration", "start", "end"), show="tree headings")
+        tree.heading("#0", text="日付")
         tree.heading("task", text="工数名")
+        tree.heading("duration", text="作業時間")
         tree.heading("start", text="開始時刻")
         tree.heading("end", text="終了時刻")
-        tree.heading("duration", text="作業時間")
 
+        tree.column("#0", width=100, anchor=tk.W) # 日付カラムの幅を設定
         tree.column("task", width=150)
+        tree.column("duration", width=100, anchor=tk.E)
         tree.column("start", width=100, anchor=tk.CENTER)
         tree.column("end", width=100, anchor=tk.CENTER)
-        tree.column("duration", width=100, anchor=tk.E)
-
         # 日付ごとにログをグループ化
         logs_by_date = {}
         for log in self.all_logs:
@@ -261,13 +383,69 @@ class AllLogsViewerDialog(tk.Toplevel):
 
         # Treeviewにデータを挿入
         for work_date, logs in logs_by_date.items():
-            date_node = tree.insert("", tk.END, text=work_date, open=False) # open=Falseで最初は閉じた状態に
+            # その日の最初のログから業務開始・終了時刻を取得
+            first_log = logs[0]
+            business_start_str = ""
+            business_end_str = ""
+            total_work_time_str = ""
+
+            if first_log['business_start_time']:
+                business_start_dt = datetime.fromisoformat(first_log['business_start_time'])
+                business_start_str = business_start_dt.strftime('%H:%M')
+            
+            if first_log['business_end_time']:
+                business_end_dt = datetime.fromisoformat(first_log['business_end_time'])
+                business_end_str = business_end_dt.strftime('%H:%M')
+                # 総作業時間を計算
+                if first_log['business_start_time']:
+                    total_work_duration = business_end_dt - datetime.fromisoformat(first_log['business_start_time'])
+                    break_time_minutes = self.master.config_manager.get('break_time_minutes', 60)
+                    net_work_duration = total_work_duration - timedelta(minutes=break_time_minutes)
+                    total_work_time_str = f"{int(net_work_duration.total_seconds() // 3600)}h {int((net_work_duration.total_seconds() % 3600) // 60)}m"
+
+            # 親ノード（日付）を挿入。
+            date_node = tree.insert("", tk.END, text=work_date, values=("", total_work_time_str, business_start_str, business_end_str), open=False)
+            
+            # --- 子ノード（工数ごとの集計と個別ログ）の処理 ---
+            tasks_for_day: Dict[str, Dict[str, Any]] = {}
             for log in logs:
+                task_name = log['task_name']
+                if task_name not in tasks_for_day:
+                    tasks_for_day[task_name] = {'total_duration': timedelta(), 'logs': []}
+                
                 start_dt = datetime.fromisoformat(log['start_time'])
                 end_dt = datetime.fromisoformat(log['end_time'])
                 duration = end_dt - start_dt
-                values = (log['task_name'], start_dt.strftime('%H:%M:%S'), end_dt.strftime('%H:%M:%S'), f"{int(duration.total_seconds() // 3600):02}:{int((duration.total_seconds() % 3600) // 60):02}:{int(duration.total_seconds() % 60):02}")
-                tree.insert(date_node, tk.END, values=values)
+
+                tasks_for_day[task_name]['total_duration'] += duration
+                tasks_for_day[task_name]['logs'].append({'start': start_dt, 'end': end_dt, 'duration': duration})
+
+            # 工数ごとの合計時間を表示
+            all_tasks_duration = timedelta()
+            for task_name, data in sorted(tasks_for_day.items()):
+                total_duration = data['total_duration']
+                all_tasks_duration += total_duration
+                duration_str = f"{int(total_duration.total_seconds() // 3600):02}:{int((total_duration.total_seconds() % 3600) // 60):02}:{int(total_duration.total_seconds() % 60):02}"
+                
+                # 工数名のノードを挿入
+                task_node = tree.insert(date_node, tk.END, text="", values=(task_name, duration_str, "", ""), open=False)
+
+                # 個別ログのノードを挿入
+                for log_detail in data['logs']:
+                    log_duration_str = f"{int(log_detail['duration'].total_seconds() // 3600):02}:{int((log_detail['duration'].total_seconds() % 3600) // 60):02}:{int(log_detail['duration'].total_seconds() % 60):02}"
+                    log_values = ("", log_duration_str, log_detail['start'].strftime('%H:%M:%S'), log_detail['end'].strftime('%H:%M:%S'))
+                    tree.insert(task_node, tk.END, text="", values=log_values)
+            
+            # 「その他」時間を計算して表示
+            if first_log['business_start_time'] and first_log['business_end_time']:
+                business_start_dt = datetime.fromisoformat(first_log['business_start_time'])
+                business_end_dt = datetime.fromisoformat(first_log['business_end_time'])
+                total_work_duration = business_end_dt - business_start_dt
+                break_time_minutes = self.master.config_manager.get('break_time_minutes', 60)
+                break_time = timedelta(minutes=break_time_minutes)
+                other_duration = total_work_duration - all_tasks_duration - break_time
+                other_duration_str = f"{int(other_duration.total_seconds() // 3600):02}:{int((other_duration.total_seconds() % 3600) // 60):02}:{int(other_duration.total_seconds() % 60):02}"
+                tree.insert(date_node, tk.END, values=("その他", other_duration_str, "", ""), text="")
 
         tree.pack(fill=tk.BOTH, expand=True)
 

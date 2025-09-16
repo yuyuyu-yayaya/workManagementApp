@@ -5,8 +5,9 @@ from datetime import datetime, date, timedelta
 
 from db_manager import DatabaseManager
 from app_state import AppState
-from dialogs import StartTimeDialog, EndTimeDialog, ResultDialog, LogViewerDialog, AllLogsViewerDialog
+from dialogs import StartTimeDialog, EndTimeDialog, ResultDialog, LogViewerDialog, AllLogsViewerDialog, EditTimeDialog, SettingsDialog
 from session_manager import SessionManager
+from config_manager import ConfigManager
 from utils import format_timedelta
 
 class WorkManagementApp(tk.Tk):
@@ -15,11 +16,12 @@ class WorkManagementApp(tk.Tk):
     COL_TASK_NAME = "task_name"
     COL_LOG = "log"
 
-    def __init__(self, db_manager: DatabaseManager, app_state: AppState, session_manager: SessionManager):
+    def __init__(self, db_manager: DatabaseManager, app_state: AppState, session_manager: SessionManager, config_manager: ConfigManager):
         super().__init__()
         self.db = db_manager
         self.state = app_state
         self.session_manager = session_manager
+        self.config_manager = config_manager
 
         self.title("工数管理アプリ")
         self.geometry("900x500")
@@ -45,41 +47,42 @@ class WorkManagementApp(tk.Tk):
         show_logs_button = ttk.Button(top_frame, text="ログ一覧", command=self.show_all_logs)
         show_logs_button.pack(side=tk.LEFT, padx=5)
 
+        settings_button = ttk.Button(top_frame, text="設定", command=self.open_settings)
+        settings_button.pack(side=tk.LEFT, padx=5)
+
         # 業務開始時刻を表示するラベル
         start_time_str = "N/A" # 初期値はN/A。後で更新する。
         self.start_time_label = ttk.Label(top_frame, text=f"業務開始: {start_time_str}", font=("", 10))
         # 中央に配置するために左右に expand する
-        self.start_time_label.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=20)
+        self.start_time_label.pack(side=tk.LEFT, padx=(20, 0)) # 右側のpaddingを削除
+
+        edit_start_time_button = ttk.Button(top_frame, text="編集", command=self.edit_business_start_time, width=5)
+        edit_start_time_button.pack(side=tk.LEFT, padx=(5, 20)) # ラベルとの間に少しスペースを空ける
 
         end_business_button = ttk.Button(top_frame, text="業務終了", command=self.end_business)
-        end_business_button.pack(side=tk.RIGHT)
+        end_business_button.pack(side=tk.RIGHT) # 業務終了ボタンは右端のまま
 
         # --- Treeview用フレーム ---
         tree_frame = ttk.Frame(self, padding=(10, 10, 10, 10))
         tree_frame.grid(row=1, column=0, sticky="nsew")
 
         # --- Treeview (タスク一覧) ---
-        columns = (self.COL_ACTION, self.COL_TASK_NAME, "total_time", "status", self.COL_LOG)
+        columns = (self.COL_TASK_NAME, self.COL_ACTION, "total_time", self.COL_LOG)
         self.tree = ttk.Treeview(tree_frame, columns=columns, show="headings")
 
         # ヘッダー設定
-        self.tree.heading(self.COL_ACTION, text="アクション")
         self.tree.heading(self.COL_TASK_NAME, text="工数名")
+        self.tree.heading(self.COL_ACTION, text="アクション")
         self.tree.heading("total_time", text="合計時間")
-        self.tree.heading("status", text="ステータス")
         self.tree.heading(self.COL_LOG, text="ログ")
         # カラム幅設定
-        self.tree.column(self.COL_TASK_NAME, width=250)
-        self.tree.column("total_time", width=100, anchor=tk.E)
-        self.tree.column("status", width=100, anchor=tk.CENTER)
-        self.tree.column(self.COL_LOG, width=350)
-
-        # Treeviewに「開始」ボタンを配置するための特別なカラムを追加
+        self.tree.column(self.COL_TASK_NAME, width=250, anchor=tk.CENTER)
         self.tree.column(self.COL_ACTION, width=100, anchor=tk.CENTER)
+        self.tree.column("total_time", width=100, anchor=tk.CENTER)
+        self.tree.column(self.COL_LOG, width=350, anchor=tk.CENTER)
 
         # 計測中の行のスタイルを設定
         self.tree.tag_configure("measuring", background="#e0f0ff") # 明るい青色
-
         self.tree.pack(side="left", fill=tk.BOTH, expand=True)
 
         self.tree.bind("<Double-1>", self.on_task_double_click)
@@ -120,7 +123,7 @@ class WorkManagementApp(tk.Tk):
             log_str = ", ".join(summary['log_texts']) if summary else ""
 
             # Treeviewにアイテムを追加
-            values = ("Start", task[self.COL_TASK_NAME], f"{total_hours:.1f}h", "", log_str)
+            values = (task[self.COL_TASK_NAME], "Start", f"{total_hours:.1f}h", log_str)
             item_id = self.tree.insert("", tk.END, values=values, tags=(str(task_id),))
             self.task_items[task_id] = item_id
         
@@ -143,7 +146,7 @@ class WorkManagementApp(tk.Tk):
         # 'log' カラムがダブルクリックされた場合、ログ詳細を表示
         elif column == f"#{self.tree['columns'].index(self.COL_LOG) + 1}":
             task_id = int(self.tree.item(item_id, "tags")[0])
-            task_name = self.tree.item(item_id, "values")[1]
+            task_name = self.tree.item(item_id, "values")[0] # task_nameはvaluesの1番目
             self.show_log_details(task_id, task_name)
         else:
             # それ以外のカラム（アクション列など）がクリックされた場合、タスクの開始/終了処理
@@ -157,7 +160,7 @@ class WorkManagementApp(tk.Tk):
                 self.end_task(clicked_task_id)
             else:
                 # 新しいタスクなので、開始処理を呼び出す
-                self.start_task(clicked_task_id, values[1]) # task_nameはvaluesの2番目
+                self.start_task(clicked_task_id, values[0]) # task_nameはvaluesの0番目
 
     def show_log_details(self, task_id: int, task_name: str):
         """指定されたタスクのログ詳細をポップアップで表示する"""
@@ -225,6 +228,29 @@ class WorkManagementApp(tk.Tk):
         all_logs = self.db.get_all_completed_logs()
         AllLogsViewerDialog(self, all_logs)
         
+    def open_settings(self):
+        """設定ダイアログを開く"""
+        SettingsDialog(self, self.config_manager)
+
+    def edit_business_start_time(self):
+        """業務開始時刻を編集するダイアログを表示する"""
+        if not self.state.business_start_time:
+            messagebox.showinfo("情報", "まだ業務が開始されていません。")
+            return
+
+        dialog = EditTimeDialog(self, "業務開始時刻の編集", self.state.business_start_time)
+        new_time = dialog.selected_time
+
+        if new_time:
+            # 状態を更新
+            self.state.business_start_time = new_time
+            # DBを更新
+            self.db.update_work_day_start_time(self.state.work_day_id, new_time)
+            # UIラベルを更新
+            self.start_time_label.config(text=f"業務開始: {new_time.strftime('%H:%M:%S')}")
+            # セッションを保存
+            self.session_manager.save_session(self.state.to_dict())
+
     def add_new_task(self):
         """新しい工数を追加するポップアップを表示"""
         task_name = simpledialog.askstring("工数追加", "新しい工数名を入力してください:", parent=self)
@@ -247,6 +273,15 @@ class WorkManagementApp(tk.Tk):
         start_time = dialog.start_time
 
         if start_time:
+            # --- 業務開始時刻の更新ロジック ---
+            # もし、まだ業務開始時刻が記録されていない（＝その日最初のタスク）なら、
+            # このタスクの開始時刻を業務開始時刻としてDBに記録する
+            if not self.state.business_start_time:
+                self.state.business_start_time = start_time
+                self.db.update_work_day_start_time(self.state.work_day_id, start_time)
+                # UIラベルも更新
+                self.start_time_label.config(text=f"業務開始: {start_time.strftime('%H:%M:%S')}")
+
             # 1. データベースに時間ログを開始したことを記録
             log_id = self.db.start_time_log(self.state.work_day_id, task_id, start_time)
 
@@ -268,11 +303,8 @@ class WorkManagementApp(tk.Tk):
         if not item_id:
             return
 
-        # ステータスを更新
-        self.tree.set(item_id, "status", "計測中...")
-
         # アクション列のテキストを更新
-        self.tree.set(item_id, self.COL_ACTION, "End")
+        self.tree.set(item_id, self.COL_ACTION, "Stop")
 
         # 背景色を変更するためのタグを追加
         self.tree.item(item_id, tags=self.tree.item(item_id, "tags") + ("measuring",))
@@ -284,12 +316,19 @@ class WorkManagementApp(tk.Tk):
             business_end_time = datetime.now()
             self.db.update_work_day_end_time(self.state.work_day_id, business_end_time)
 
+            # 設定から休憩時間を取得
+            break_minutes = self.config_manager.get('break_time_minutes', 60)
             # サマリーデータをDBManagerから取得
             summary_data = self.db.get_summary_for_day(
                 self.state.work_day_id,
                 self.state.business_start_time,
-                business_end_time
+                business_end_time,
+                break_minutes
             )
+
+            # 表示用に開始・終了時刻をサマリーデータに追加
+            summary_data['business_start_time_str'] = self.state.business_start_time.strftime('%H:%M')
+            summary_data['business_end_time_str'] = business_end_time.strftime('%H:%M')
 
             # 画面7（リザルト画面）を表示
             ResultDialog(self, summary_data)
@@ -311,6 +350,9 @@ class WorkManagementApp(tk.Tk):
             # 3. アプリケーションの状態をリセット
             self.state.end_task()
             
+            # 4. セッションファイルをクリア
+            self.session_manager.save_session(self.state.to_dict())
+
             # 4. Treeviewを再読み込みして合計時間とログを更新
             self.load_tasks()
 
@@ -320,8 +362,7 @@ class WorkManagementApp(tk.Tk):
         if not item_id:
             return
 
-        # ステータスとアクションを元に戻す
-        self.tree.set(item_id, "status", "")
+        # アクションを元に戻す
         self.tree.set(item_id, self.COL_ACTION, "Start")
         
         # 背景色を元に戻すためにタグを削除
@@ -333,6 +374,10 @@ class WorkManagementApp(tk.Tk):
 
     def on_closing(self):
         # タスクが実行中でない場合（＝正常な中断）はセッションを残す
+        if self.state.current_task_id is None:
+            # 正常終了時はセッションをクリアする
+            self.session_manager.save_session(self.state.to_dict())
+
         self.db.close()
         self.destroy()
 
@@ -350,46 +395,15 @@ if __name__ == "__main__":
     
     db_path = app_data_dir / "work_management.db"
     session_path = app_data_dir / "session.json"
+    config_path = app_data_dir / "config.json"
 
     # --- アプリケーション起動シーケンス ---
 
     # 1. 各マネージャと状態クラスをインスタンス化
     db_manager = DatabaseManager(db_path)
+    config_manager = ConfigManager(config_path)
     app_state = AppState()
     session_manager = SessionManager(session_path)
-
-    # --- 前日のサマリー表示 (オプション) ---
-    yesterday = date.today() - timedelta(days=1)
-    yesterday_work_day = db_manager.get_work_day_by_date(yesterday)
-
-    # --- デバッグ用プリント ---
-    print("--- 起動時デバッグ情報 ---")
-    print(f"前日の業務記録 (yesterday_work_day): {dict(yesterday_work_day) if yesterday_work_day else 'None'}")
-
-    # 前日の作業記録があり、かつ業務終了時刻が記録されている場合
-    if yesterday_work_day and yesterday_work_day['end_time']:
-        try:
-            # yesterday_work_day['start_time'] が文字列であることを確認してから変換
-            start_time_val = yesterday_work_day['start_time']
-            end_time_val = yesterday_work_day['end_time']
-
-            # start_time と end_time が両方ともNoneでないことを確認
-            if start_time_val and end_time_val:
-                start_time = datetime.fromisoformat(start_time_val)
-                end_time = datetime.fromisoformat(end_time_val)
-            
-                # サマリーデータを取得
-                summary_data = db_manager.get_summary_for_day(yesterday_work_day['id'], start_time, end_time)
-                
-                # --- デバッグ用プリント ---
-                print(f"生成されたサマリーデータ (summary_data): {summary_data}")
-
-                # リザルトダイアログを表示 (親ウィンドウなしで表示)
-                ResultDialog(None, summary_data)
-
-        except (TypeError, ValueError) as e:
-            print(f"前日のサマリー表示中にエラーが発生しました: {e}")
-    print("------------------------")
 
     # 2. 今日の日付に対応する work_day_id をDBから取得/作成し、状態にセット
     today_work_day_id = db_manager.get_or_create_work_day(app_state.work_date)
@@ -397,23 +411,55 @@ if __name__ == "__main__":
 
     # 3. セッションファイルを読み込み、今日の日付のデータであれば状態を復元
     session_data = session_manager.load_session()
-
     if session_data and session_data.get('work_day_id') == today_work_day_id:
         app_state.from_dict(session_data)
 
+    # --- 前日のサマリー表示（その日最初の起動時のみ） ---
+    today_str = date.today().isoformat()
+    last_summary_shown_date = session_data.get('last_summary_shown_date') if session_data else None
+
+    if last_summary_shown_date != today_str:
+        yesterday = date.today() - timedelta(days=1)
+        yesterday_work_day = db_manager.get_work_day_by_date(yesterday)
+
+        if yesterday_work_day and yesterday_work_day['end_time']:
+            try:
+                start_time_val = yesterday_work_day['start_time']
+                end_time_val = yesterday_work_day['end_time']
+
+                if start_time_val and end_time_val:
+                    start_time = datetime.fromisoformat(start_time_val)
+                    end_time = datetime.fromisoformat(end_time_val)
+                    
+                    break_minutes = config_manager.get('break_time_minutes', 60)
+                    summary_data = db_manager.get_summary_for_day(yesterday_work_day['id'], start_time, end_time, break_minutes)
+                    
+                    # 表示用に開始・終了時刻をサマリーデータに追加
+                    summary_data['business_start_time_str'] = start_time.strftime('%H:%M')
+                    summary_data['business_end_time_str'] = end_time.strftime('%H:%M')
+
+                    # リザルトダイアログを表示 (親ウィンドウなしで表示)
+                    ResultDialog(None, summary_data)
+
+            except (TypeError, ValueError) as e:
+                print(f"前日のサマリー表示中にエラーが発生しました: {e}")
+
+        # サマリー表示日を記録してセッションを保存
+        current_session = app_state.to_dict()
+        current_session['last_summary_shown_date'] = today_str
+        session_manager.save_session(current_session)
+
     # 4. 業務開始時刻がまだ設定されていなければ、記録してセッションに保存
     if not app_state.business_start_time:
-        app_state.start_business()
-        # データベースにも業務開始時刻を記録
-        db_manager.update_work_day_start_time(today_work_day_id, app_state.business_start_time)
-        session_manager.save_session(app_state.to_dict())
+        pass # 最初のタスク開始時に記録するため、ここでは何もしない
 
     # 5. アプリケーションのUIを初期化
-    app = WorkManagementApp(db_manager, app_state, session_manager)
+    app = WorkManagementApp(db_manager, app_state, session_manager, config_manager)
 
     # 6. UIのラベルに業務開始時刻を反映させ、タスクリストを読み込む
-    start_time_str = app.state.business_start_time.strftime('%H:%M:%S')
-    app.start_time_label.config(text=f"業務開始: {start_time_str}")
+    if app.state.business_start_time:
+        start_time_str = app.state.business_start_time.strftime('%H:%M:%S')
+        app.start_time_label.config(text=f"業務開始: {start_time_str}")
     app.load_tasks()
 
     app.mainloop()

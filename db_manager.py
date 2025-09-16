@@ -225,7 +225,7 @@ class DatabaseManager:
         except sqlite3.Error as e:
             print(f"日付によるWork Day取得エラー: {e}")
             return None
-    def get_summary_for_day(self, work_day_id: int, business_start_time: datetime, business_end_time: datetime) -> Dict[str, Any]:
+    def get_summary_for_day(self, work_day_id: int, business_start_time: datetime, business_end_time: datetime, break_time_minutes: int) -> Dict[str, Any]:
         """
         指定された業務日の作業サマリーを計算して返す。
 
@@ -233,6 +233,7 @@ class DatabaseManager:
             work_day_id (int): work_daysテーブルのID。
             business_start_time (datetime): 業務全体の開始時刻。
             business_end_time (datetime): 業務全体の終了時刻。
+            break_time_minutes (int): 休憩時間（分）。
 
         Returns:
             Dict[str, Any]: サマリーデータ。
@@ -256,10 +257,17 @@ class DatabaseManager:
             task_details[task_id]['duration'] += duration
 
         total_work_duration = business_end_time - business_start_time
-        other_duration = total_work_duration - total_task_duration
+
+        # 引数から休憩時間をtimedeltaオブジェクトに変換
+        break_time = timedelta(minutes=break_time_minutes)
+
+        net_work_duration = total_work_duration - break_time
+        # その他時間 = 総労働時間 - タスク合計時間 - 休憩時間
+        other_duration = net_work_duration - total_task_duration
 
         return {
             'total_work_time': format_timedelta(total_work_duration),
+            'net_work_time': format_timedelta(net_work_duration),
             'total_task_time': format_timedelta(total_task_duration),
             'other_time': format_timedelta(other_duration),
             'task_details': [{'name': v['name'], 'duration_str': format_timedelta(v['duration'])} for v in sorted(task_details.values(), key=lambda x: x['name'])]
@@ -338,6 +346,8 @@ class DatabaseManager:
                 SELECT
                     wd.work_date,
                     t.task_name,
+                    wd.start_time AS business_start_time,
+                    wd.end_time AS business_end_time,
                     tl.start_time,
                     tl.end_time
                 FROM time_logs tl
@@ -391,6 +401,28 @@ class DatabaseManager:
         """データベース接続を閉じる。"""
         if self.conn:
             self.conn.close()
+
+    def debug_get_all_data(self) -> Dict[str, List[Dict[str, Any]]]:
+        """【デバッグ用】すべてのテーブルの全データを取得する"""
+        if not self.cursor:
+            return {}
+
+        tables = ["work_days", "tasks", "time_logs"]
+        all_data = {}
+
+        try:
+            for table_name in tables:
+                self.cursor.execute(f"SELECT * FROM {table_name}")
+                rows = self.cursor.fetchall()
+                # sqlite3.Rowオブジェクトを辞書のリストに変換
+                all_data[table_name] = [dict(row) for row in rows]
+        except sqlite3.Error as e:
+            print(f"デバッグデータ取得エラー: {e}")
+            return {}
+
+        return all_data
+
+
 
 if __name__ == "__main__":
     db = DatabaseManager()

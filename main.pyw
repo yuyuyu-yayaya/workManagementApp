@@ -274,13 +274,7 @@ class WorkManagementApp(tk.Tk):
 
         if start_time:
             # --- 業務開始時刻の更新ロジック ---
-            # もし、まだ業務開始時刻が記録されていない（＝その日最初のタスク）なら、
-            # このタスクの開始時刻を業務開始時刻としてDBに記録する
-            if not self.state.business_start_time:
-                self.state.business_start_time = start_time
-                self.db.update_work_day_start_time(self.state.work_day_id, start_time)
-                # UIラベルも更新
-                self.start_time_label.config(text=f"業務開始: {start_time.strftime('%H:%M:%S')}")
+            # 業務開始時刻はアプリ起動時に記録されるため、ここでは何もしない
 
             # 1. データベースに時間ログを開始したことを記録
             log_id = self.db.start_time_log(self.state.work_day_id, task_id, start_time)
@@ -405,53 +399,63 @@ if __name__ == "__main__":
     app_state = AppState()
     session_manager = SessionManager(session_path)
 
-    # 2. 今日の日付に対応する work_day_id をDBから取得/作成し、状態にセット
-    today_work_day_id = db_manager.get_or_create_work_day(app_state.work_date)
-    app_state.work_day_id = today_work_day_id
+    # 2. DBから今日の業務日情報を取得/作成し、AppStateを初期化
+    today_work_day_record = db_manager.get_work_day_by_date(date.today())
+    if not today_work_day_record:
+        # 今日のレコードがなければ作成し、その際に業務開始時刻も記録
+        work_day_id = db_manager.get_or_create_work_day(date.today())
+        app_state.work_day_id = work_day_id
+        app_state.business_start_time = datetime.now()
+        db_manager.update_work_day_start_time(work_day_id, app_state.business_start_time)
+    else:
+        # 今日のレコードがあれば、その情報(IDと開始時刻)でAppStateを初期化
+        app_state.work_day_id = today_work_day_record['id']
+        if today_work_day_record['start_time']:
+            app_state.business_start_time = datetime.fromisoformat(today_work_day_record['start_time'])
 
     # 3. セッションファイルを読み込み、今日の日付のデータであれば状態を復元
     session_data = session_manager.load_session()
-    if session_data and session_data.get('work_day_id') == today_work_day_id:
+    if session_data and session_data.get('work_day_id') == app_state.work_day_id:
         app_state.from_dict(session_data)
 
-    # --- 前日のサマリー表示（その日最初の起動時のみ） ---
-    today_str = date.today().isoformat()
-    last_summary_shown_date = session_data.get('last_summary_shown_date') if session_data else None
+    # # --- 前日のサマリー表示（その日最初の起動時のみ） ---
+    # today_str = date.today().isoformat()
+    # last_summary_shown_date = session_data.get('last_summary_shown_date') if session_data else None
 
-    if last_summary_shown_date != today_str:
-        yesterday = date.today() - timedelta(days=1)
-        yesterday_work_day = db_manager.get_work_day_by_date(yesterday)
+    # if last_summary_shown_date != today_str:
+    #     yesterday = date.today() - timedelta(days=1)
+    #     yesterday_work_day = db_manager.get_work_day_by_date(yesterday)
 
-        if yesterday_work_day and yesterday_work_day['end_time']:
-            try:
-                start_time_val = yesterday_work_day['start_time']
-                end_time_val = yesterday_work_day['end_time']
+    #     if yesterday_work_day and yesterday_work_day['end_time']:
+    #         try:
+    #             start_time_val = yesterday_work_day['start_time']
+    #             end_time_val = yesterday_work_day['end_time']
 
-                if start_time_val and end_time_val:
-                    start_time = datetime.fromisoformat(start_time_val)
-                    end_time = datetime.fromisoformat(end_time_val)
+    #             if start_time_val and end_time_val:
+    #                 start_time = datetime.fromisoformat(start_time_val)
+    #                 end_time = datetime.fromisoformat(end_time_val)
                     
-                    break_minutes = config_manager.get('break_time_minutes', 60)
-                    summary_data = db_manager.get_summary_for_day(yesterday_work_day['id'], start_time, end_time, break_minutes)
+    #                 break_minutes = config_manager.get('break_time_minutes', 60)
+    #                 summary_data = db_manager.get_summary_for_day(yesterday_work_day['id'], start_time, end_time, break_minutes)
                     
-                    # 表示用に開始・終了時刻をサマリーデータに追加
-                    summary_data['business_start_time_str'] = start_time.strftime('%H:%M')
-                    summary_data['business_end_time_str'] = end_time.strftime('%H:%M')
+    #                 # 表示用に開始・終了時刻をサマリーデータに追加
+    #                 summary_data['business_start_time_str'] = start_time.strftime('%H:%M')
+    #                 summary_data['business_end_time_str'] = end_time.strftime('%H:%M')
 
-                    # リザルトダイアログを表示 (親ウィンドウなしで表示)
-                    ResultDialog(None, summary_data)
+    #                 # リザルトダイアログを表示 (親ウィンドウなしで表示)
+    #                 ResultDialog(None, summary_data)
 
-            except (TypeError, ValueError) as e:
-                print(f"前日のサマリー表示中にエラーが発生しました: {e}")
+    #         except (TypeError, ValueError) as e:
+    #             print(f"前日のサマリー表示中にエラーが発生しました: {e}")
 
-        # サマリー表示日を記録してセッションを保存
-        current_session = app_state.to_dict()
-        current_session['last_summary_shown_date'] = today_str
-        session_manager.save_session(current_session)
+    #     # サマリー表示日を記録してセッションを保存（app_stateの状態は維持する）
+    #     session_to_save = app_state.to_dict()
+    #     session_to_save['last_summary_shown_date'] = today_str
+    #     session_manager.save_session(session_to_save)
 
     # 4. 業務開始時刻がまだ設定されていなければ、記録してセッションに保存
-    if not app_state.business_start_time:
-        pass # 最初のタスク開始時に記録するため、ここでは何もしない
+    # セッション復元によって business_start_time が設定された場合、
+    # DBにも反映させる必要がある。 -> この処理は start_task と UI反映時に集約
 
     # 5. アプリケーションのUIを初期化
     app = WorkManagementApp(db_manager, app_state, session_manager, config_manager)
